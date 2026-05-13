@@ -36,6 +36,12 @@ parts.each_with_index do |c, index|
   elsif c =~ /^\d+$/
     if parts[index + 1] == "." || parts[index + 1] == ","
         _decimal_number = ""
+        _decimal_number = _decimal_number + c
+        i = 0
+        while parts[index + i] != " " || parts[index + i] != ";"
+            _decimal_number = _decimal_number + parts[index + i]
+        end
+        tokens << Token.new("DECIMAL", _decimal_number)
     else
         tokens << Token.new("INT", c)
     end
@@ -44,6 +50,7 @@ parts.each_with_index do |c, index|
   else
     tokens << Token.new("UNKNOWN", c)
   end
+  puts c
 end
 
 puts tokens
