@@ -23,14 +23,15 @@ end
 
 class Block
 	attr_reader :idx, :type, :indent
-	attr_accessor :args
+	attr_accessor :args, :target_idx
 	
 	def initialize(idx, type, args = [], indent = 0)
 		@idx = idx
 		@type = type
 		@args = args
 		@indent = indent
-  	end
+		@target_idx = nil
+	end
 
 	def to_s
 		"Block(##{@idx}: #{@type}, args=#{@args.inspect}, indent=#{@indent})"
@@ -62,11 +63,14 @@ class Block
 		when "IF_BLOCK"
 			raw = @args[0]
 			val = env.key?(raw) ? env[raw].show_value : coerce(raw, env)
-			val.to_f != 0
+			val.to_f != 0 ? 1 : 0
+
 		when "ELSE_BLOCK"
 			nil
+
 		when "BRAKET_OPEN_CURL", "BRAKET_CLOSE_CURL"
 			nil
+
 		else
 			raise "Unkwnow block type: #{@type}"
 		end
@@ -88,10 +92,10 @@ class Block
 		end
 	end
 
-  	def infer_type(raw)
+	def infer_type(raw)
 		return "DECIMAL" if raw =~ /^\d+\.\d+$/
 		return "INT" if raw =~ /^\d+$/
-    	"STRING"
+		"STRING"
 	end
 end
 
@@ -147,7 +151,6 @@ if ARGV[0]
 	_msg = File.read(source_path).gsub("\n", " ").strip
 end
 
-# _msg = "let x = 10.2; print(x); print(5); if (x) { print(1) } else { print(0) }"
 parts = []
 tokens = []
 declared = []
@@ -181,8 +184,8 @@ parts.each_with_index do |c, index|
 end
 
 # AST creation process 
-ast   = []
-_idx  = 0
+ast  = []
+_idx = 0
 
 tokens.each_with_index do |token, i|
 	block = case token.type
@@ -221,34 +224,43 @@ tokens.each_with_index do |token, i|
 	ast << block
 end
 
-# Brackets and If-Else evaluation
+# Bracket matching and indentation tracking
 
 _indentation = 0
 _last = "BRAKET_CLOSE_CURL"
 
 if exitcode == 0
 	ast.each do |block|
-	if block.type == "BRAKET_OPEN_CURL"
-		if _last == "BRAKET_CLOSE_CURL"
-		_indentation += 1
-		_last = "BRAKET_OPEN_CURL"
-		else
-		puts "ERROR: Unexpected open bracket"; exitcode = EXITCODES["Bracket error"]; break
+		if block.type == "BRAKET_OPEN_CURL"
+			if _last == "BRAKET_CLOSE_CURL"
+				_indentation += 1
+				_last = "BRAKET_OPEN_CURL"
+			else
+				puts "ERROR: Unexpected open bracket"; exitcode = EXITCODES["Bracket error"]; break
+			end
+		elsif block.type == "BRAKET_CLOSE_CURL"
+			if _last == "BRAKET_OPEN_CURL"
+				_indentation -= 1
+				_last = "BRAKET_CLOSE_CURL"
+			else
+				puts "ERROR: Unexpected close bracket"; exitcode = EXITCODES["Bracket error"]; break
+			end
 		end
-	elsif block.type == "BRAKET_CLOSE_CURL"
-		if _last == "BRAKET_OPEN_CURL"
-		_indentation -= 1
-		_last = "BRAKET_CLOSE_CURL"
-		else
-		puts "ERROR: Unexpected close bracket"; exitcode = EXITCODES["Bracket error"]; break
+
+		if _indentation < 0
+			puts "ERROR: Unmatched bracket"; exitcode = EXITCODES["Bracket error"]; break
 		end
+
+		block.args << _indentation
 	end
 
-	if _indentation < 0
-		puts "ERROR: Unmatched bracket"; exitcode = EXITCODES["Bracket error"]; break
-	end
-
-	block.args << _indentation
+	# For each IF/ELSE, find the closing } at the same indent level
+	# target_idx tells the interpreter where to jump when skipping a branch
+	ast.each_with_index do |block, i|
+		next unless block.type == "IF_BLOCK" || block.type == "ELSE_BLOCK"
+		my_indent = block.args.last
+		target = ast[(i+1)..].find { |b| b.type == "BRAKET_CLOSE_CURL" && b.args.last == my_indent }
+		block.target_idx = target&.idx
 	end
 end
 
@@ -256,36 +268,35 @@ end
 
 if exitcode == 0
 	env = {}
-	skip_indent = nil
-	else_pending = false
+	skip_until_idx = nil
+	else_pending   = false
 
 	ast.each do |block|
-		if skip_indent && block.indent >= skip_indent &&
-			block.type != "BRAKET_CLOSE_CURL"
-			else_pending = (block.type == "ELSE_BLOCK")
+		# Skip blocks inside a branch we're not taking, up to and including the closing }
+		if skip_until_idx && block.idx <= skip_until_idx
+			else_pending   = true if block.type == "ELSE_BLOCK"
+			skip_until_idx = nil  if block.idx == skip_until_idx
 			next
 		end
-		skip_indent  = nil if block.type == "BRAKET_CLOSE_CURL"
 
 		result = block.execute(env)
 
 		if block.type == "IF_BLOCK"
-			unless result
-				skip_indent  = block.indent + 1
-				else_pending = true
+			if result == 0
+				# Condition is false: skip to the closing } and wait for a possible else
+				skip_until_idx = block.target_idx
+				else_pending   = true
 			else
 				else_pending = false
 			end
 		end
 
 		if block.type == "ELSE_BLOCK"
-			skip_indent = else_pending ? nil : block.indent + 1
-			else_pending = false
+			# If the if-branch ran, skip the else-branch; otherwise let it through
+			skip_until_idx = else_pending ? nil : block.target_idx
+			else_pending   = false
 		end
 	end
 end
 
 puts "Ended with code #{exitcode}"
-
-
-

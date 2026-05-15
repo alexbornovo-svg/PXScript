@@ -24,5 +24,11 @@ To try it, create a file, put in some PXScript code, and then run the command
 
 and it will work (i hope)
 
+## Road map
+
+1. Comparison
+2. Goto
+3. Loops
+
 -----
-PXScript version 0.0.2 - Alexbornovo 2026
+PXScript version 0.0.3 - Alexbornovo 2026

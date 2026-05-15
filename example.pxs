@@ -3,7 +3,7 @@ get(x);
 print(x); 
 
 print("Numeri numeri numeri");
-if (x) 
+if (0) 
 { 
     print(1);
 } 
